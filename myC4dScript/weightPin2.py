@@ -1,8 +1,7 @@
 import c4d
 
 def getPointPos(obj: c4d.BaseObject, index: int) -> c4d.Vector:
-    cache = obj.GetDeformCache() # get deforme cache
-    obj = obj if cache is None else cache
+    obj = obj.GetDeformCache() or obj # get deforme cache
     return obj.GetPoint(index) * obj.GetMg()
 
 def normalizeWeights(weightData: dict[c4d.BaseObject, float]) -> dict[c4d.BaseObject, float]:
@@ -30,12 +29,12 @@ def getSelectedPointWeight(selectedPoints: list[int],
         weightDatas[p] = normalizeWeights(data)
     return weightDatas
 
-def createLoc(parent, vec):
+def createLoc(parent, index, vec):
     grp = c4d.BaseObject(c4d.Onull)
     doc.AddUndo(c4d.UNDOTYPE_NEW, grp)
     doc.InsertObject(grp)
     grp[c4d.NULLOBJECT_DISPLAY] = 14
-    grp.SetName('{}_weightPin_LOC'.format(parent.GetName()))
+    grp.SetName('{}_weightPin_LOC_{}'.format(parent.GetName(), index))
     grp.InsertUnder(parent)
     matrix = c4d.Matrix()
     matrix.off = vec
@@ -50,6 +49,13 @@ def PinObj(datas: dict[int, dict], obj) -> None:
         grp = c4d.BaseObject(c4d.Onull)
         doc.AddUndo(c4d.UNDOTYPE_NEW, grp)
         doc.InsertObject(grp)
+        # ------------------------------------------------
+        inExcludeData = c4d.InExcludeData()
+        userInnExclude = c4d.GetCustomDatatypeDefault(c4d.CUSTOMDATATYPE_INEXCLUDE_LIST)
+        userInnExclude[c4d.DESC_NAME] = 'PinLOCS'
+        userInnExclude[c4d.DESC_HIDE] = True
+        userInnExcludeId = grp.AddUserData(userInnExclude)
+        # -----------------------------------------------------
         grp.SetName('weightPin_LOC_' + str(index))
         grp[c4d.NULLOBJECT_DISPLAY] = 1
         # ----------------------------------------
@@ -65,34 +71,71 @@ def PinObj(datas: dict[int, dict], obj) -> None:
         for joint, weight in data.items():
             c4d.CallButton(tag, c4d.ID_CA_CONSTRAINT_TAG_PSR_ADD)
             # ---------------------------------------------------
-            loc = createLoc(joint, vec)
+            loc = createLoc(joint, index, vec)
             tag[startIndex] = loc
-
+            inExcludeData.InsertObject(loc, 1)
             # --------------------------------------------------
             tag[startIndex + 1] = weight
             startIndex += 10
-
+        grp[userInnExcludeId] = inExcludeData
         doc.SetSelection(grp, c4d.SELECTION_ADD)
 
+# ------------------------------------------------------
+def isPinLoc(obj):
+    if not obj.CheckType(c4d.Onull): return False
+    if not obj.GetUserDataContainer(): return False
+    if not isinstance(obj[c4d.ID_USERDATA,1], c4d.InExcludeData):return False
+    return True
+
+def deleteTargets(obj):
+    lst = obj[c4d.ID_USERDATA,1]
+    objsCount = lst.GetObjectCount()
+    objList = [lst.ObjectFromIndex(doc, i) for i in range(objsCount)]
+
+    for _obj in objList:
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE, _obj)
+        _obj.Remove()
+
+# ------------------------------------------------------
 def main() -> None:
     obj = doc.GetActiveObject()
-    if not isinstance(obj, c4d.PolygonObject):
-        c4d.gui.MessageDialog('Please select a polygon object!')
+    if obj is None:
         return
-    
-    weightTag = obj.GetTag(c4d.Tweights)
-    if weightTag is None:
-        c4d.gui.MessageDialog('The selected object has no weight tag!')
-        return
-        
+
     doc.StartUndo()
-    doc.SetSelection(obj, c4d.SELECTION_SUB)
-    selPoints  = getSelectedPoints(obj)
-    weightData = getSelectedPointWeight(selPoints, weightTag)
-    PinObj(weightData, obj)
-    c4d.CallCommand(12298)
+    if isPinLoc(obj):
+        deleteTargets(obj)
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
+        obj.Remove()
+    else:
+        if not isinstance(obj, c4d.PolygonObject):
+            c4d.gui.MessageDialog('Please select a polygon object!')
+            return
+
+        weightTag = obj.GetTag(c4d.Tweights)
+        if weightTag is None:
+            c4d.gui.MessageDialog('The selected object has no weight tag!')
+            return
+
+        doc.SetSelection(obj, c4d.SELECTION_SUB)
+        selPoints  = getSelectedPoints(obj)
+        weightData = getSelectedPointWeight(selPoints, weightTag)
+        PinObj(weightData, obj)
+        c4d.CallCommand(12298)
     doc.EndUndo()
     c4d.EventAdd()
 
 if __name__ == '__main__':
     main()
+
+'''
+Revision History
+Revision 1: 2024-07-8  : First publish
+Revision 2: 2024-07-20 : Add an null obj to the joint
+
+code by kangddan
+https://github.com/kangddan
+https://animator.at8.fun/
+https://space.bilibili.com/174575687
+https://x.com/kangddan1
+'''
