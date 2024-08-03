@@ -1,6 +1,60 @@
 import c4d
 from c4d import gui
-doc = c4d.documents.GetActiveDocument()
+
+class GetSelectedPointID(object):
+
+    def __init__(self, obj, modeId):
+        self.obj    = obj
+        self.modeId = modeId
+
+    def run(self) -> list[int]:
+        if self.modeId == c4d.Mpoints:
+            return self.pointsToId(self.obj)
+        elif self.modeId == c4d.Medges:
+            return self.edgesToId(self.obj)
+        elif self.modeId == c4d.Mpolygons:
+            return self.polysToId(self.obj)
+        return []
+    
+    @staticmethod
+    def pointsToId(obj) -> list[int]:
+        bs  = obj.GetPointS()
+        sel = bs.GetAll(obj.GetPointCount())
+        return [index for index, selected in enumerate(sel) if selected]
+        
+    @staticmethod
+    def polysToId(obj) -> set[int]:
+        bs  = obj.GetPolygonS()
+        sel = bs.GetAll(obj.GetPolygonCount())
+        selPolyId = [index for index, selected in enumerate(sel) if selected]
+
+        # ---------------------------------------------------
+        polys: list[c4d.CPolygon] = obj.GetAllPolygons()
+        selPointsId = set()
+        for index in selPolyId:
+            poly:c4d.CPolygon = polys[index]
+            selPointsId.update([poly.a, poly.b, poly.c, poly.d])
+        return selPointsId
+        
+    @staticmethod
+    def edgesToId(obj) -> set[int]:
+        selEdge: c4d.BaseSelect   = obj.GetEdgeS()
+        polys: list[c4d.CPolygon] = obj.GetAllPolygons()
+        
+        selectedEdges = set()
+        for polyIndex, poly in enumerate(polys):
+            edges = [
+                (poly.a, poly.b),
+                (poly.b, poly.c),
+                (poly.c, poly.d if poly.c != poly.d else poly.a),
+                (poly.d if poly.c != poly.d else poly.a, poly.a)
+            ]
+            for edgeIndex, (v1, v2) in enumerate(edges):
+                selectionIndex = 4 * polyIndex + edgeIndex
+                if selEdge.IsSelected(selectionIndex):
+                    selectedEdges.update((v1, v2))
+                    
+        return selectedEdges
 
 class CopyPointWeightUI(gui.GeDialog):
     MAINLAYOUTID = 41650
@@ -46,9 +100,10 @@ class CopyPointWeightUI(gui.GeDialog):
     # ---------------------------------------------------------
 
     def Command(self, _id, message):
+
         obj = doc.GetActiveObject()
-        if not isinstance(obj, c4d.PolygonObject):
-            c4d.gui.MessageDialog('Please select a polygon object!')
+        if not obj.CheckType(c4d.Opoint):
+            c4d.gui.MessageDialog('Please select a point object!')
             return True
 
         weightTag = obj.GetTag(c4d.Tweights)
@@ -57,6 +112,10 @@ class CopyPointWeightUI(gui.GeDialog):
             return True
 
         if _id == self.COPYBUTID:
+            if doc.GetMode() != c4d.Mpoints:
+                c4d.gui.MessageDialog('Please copy/paste in point mode!')
+                return True
+            
             self.weights = []
             _str = self.getSelectedPointWeight(obj, weightTag, self.weights)
 
@@ -65,6 +124,9 @@ class CopyPointWeightUI(gui.GeDialog):
             linkBox.SetLink(obj)
 
         elif _id == self.PASTEBUTID:
+            if not doc.IsEditMode():
+                c4d.gui.MessageDialog('Please in edit mode!')
+                return True
             doc.StartUndo()
             doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
             self.setSelectedPointsWeight(obj, weightTag, self.weights)
@@ -75,7 +137,7 @@ class CopyPointWeightUI(gui.GeDialog):
     # ------------------------------------------------------
     @staticmethod
     def getSelectedPointWeight(obj, weightTag, weightData):
-        for p in CopyPointWeightUI.getSelectedPoints(obj):
+        for p in GetSelectedPointID(obj, doc.GetMode()).run():
             for j in range(weightTag.GetJointCount()):
                 pointWeight = weightTag.GetWeight(j, p)
                 weightData.append(pointWeight)
@@ -83,21 +145,11 @@ class CopyPointWeightUI(gui.GeDialog):
 
     @staticmethod
     def setSelectedPointsWeight(obj, weightTag, weightData):
-        for p in CopyPointWeightUI.getSelectedPoints(obj):
+        for p in GetSelectedPointID(obj, doc.GetMode()).run():
             for index, j in enumerate(range(weightTag.GetJointCount())):
                 #weightTag.SetWeight(j, p, 0.0)
                 weightTag.SetWeight(j, p, weightData[index])
         weightTag.WeightDirty() # update Skin
-
-    @staticmethod
-    def _getSelectedPoints(obj):
-        return [p for p in range(obj.GetPointCount()) if obj.GetPointS().IsSelected(p)]
-
-    @staticmethod
-    def getSelectedPoints(obj):
-        bs = obj.GetPointS()
-        sel = bs.GetAll(obj.GetPointCount())
-        return [index for index, selected in enumerate(sel) if selected]
 
 if __name__=='__main__':
     CopyPointWeightUI.UIDisplay()
@@ -106,4 +158,5 @@ if __name__=='__main__':
 code by kangddan
 Revision History
 Revision 1: 2024-04-23 : First publish
+Revision 1: 2024-08-03 : Correctly identify point IDs in point, edge, and polygon modes
 """
