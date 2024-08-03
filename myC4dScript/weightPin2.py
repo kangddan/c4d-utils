@@ -54,7 +54,7 @@ class GetSelectedPointID(object):
                     selectedEdges.update((v1, v2))
 
         return selectedEdges
-        
+
 def getPointPos(obj: c4d.BaseObject, index: int) -> c4d.Vector:
     obj = obj.GetDeformCache() or obj # get deforme cache
     return obj.GetPoint(index) * obj.GetMg()
@@ -149,7 +149,7 @@ def deleteTargets(obj):
 # ------------------------------------------------------
 def main() -> None:
     obj = doc.GetActiveObject()
-    if obj is None:
+    if not obj:
         return
 
     doc.StartUndo()
@@ -158,8 +158,12 @@ def main() -> None:
         doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
         obj.Remove()
     else:
-        if not isinstance(obj, c4d.PolygonObject):
-            c4d.gui.MessageDialog('Please select a polygon object!')
+        if not doc.IsEditMode():
+            c4d.gui.MessageDialog('Please in edit mode!')
+            return
+
+        if not obj.CheckType(c4d.Opoint):
+            c4d.gui.MessageDialog('Please select a point object!')
             return
 
         weightTag = obj.GetTag(c4d.Tweights)
@@ -171,7 +175,7 @@ def main() -> None:
         selPoints  = GetSelectedPointID(obj, doc.GetMode()).run()
         weightData = getSelectedPointWeight(selPoints, weightTag)
         PinObj(weightData, obj)
-        c4d.CallCommand(12298)
+        doc.SetMode(c4d.Mmodel)
     doc.EndUndo()
     c4d.EventAdd()
 
