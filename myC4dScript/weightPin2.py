@@ -1,5 +1,60 @@
 import c4d
 
+class GetSelectedPointID(object):
+
+    def __init__(self, obj, modeId):
+        self.obj    = obj
+        self.modeId = modeId
+
+    def run(self) -> list[int]:
+        if self.modeId == c4d.Mpoints:
+            return self.pointsToId(self.obj)
+        elif self.modeId == c4d.Medges:
+            return self.edgesToId(self.obj)
+        elif self.modeId == c4d.Mpolygons:
+            return self.polysToId(self.obj)
+        return []
+
+    @staticmethod
+    def pointsToId(obj) -> list[int]:
+        bs  = obj.GetPointS()
+        sel = bs.GetAll(obj.GetPointCount())
+        return [index for index, selected in enumerate(sel) if selected]
+
+    @staticmethod
+    def polysToId(obj) -> set[int]:
+        bs  = obj.GetPolygonS()
+        sel = bs.GetAll(obj.GetPolygonCount())
+        selPolyId = [index for index, selected in enumerate(sel) if selected]
+
+        # ---------------------------------------------------
+        polys: list[c4d.CPolygon] = obj.GetAllPolygons()
+        selPointsId = set()
+        for index in selPolyId:
+            poly:c4d.CPolygon = polys[index]
+            selPointsId.update([poly.a, poly.b, poly.c, poly.d])
+        return selPointsId
+
+    @staticmethod
+    def edgesToId(obj) -> set[int]:
+        selEdge: c4d.BaseSelect   = obj.GetEdgeS()
+        polys: list[c4d.CPolygon] = obj.GetAllPolygons()
+
+        selectedEdges = set()
+        for polyIndex, poly in enumerate(polys):
+            edges = [
+                (poly.a, poly.b),
+                (poly.b, poly.c),
+                (poly.c, poly.d if poly.c != poly.d else poly.a),
+                (poly.d if poly.c != poly.d else poly.a, poly.a)
+            ]
+            for edgeIndex, (v1, v2) in enumerate(edges):
+                selectionIndex = 4 * polyIndex + edgeIndex
+                if selEdge.IsSelected(selectionIndex):
+                    selectedEdges.update((v1, v2))
+
+        return selectedEdges
+        
 def getPointPos(obj: c4d.BaseObject, index: int) -> c4d.Vector:
     obj = obj.GetDeformCache() or obj # get deforme cache
     return obj.GetPoint(index) * obj.GetMg()
@@ -9,11 +64,6 @@ def normalizeWeights(weightData: dict[c4d.BaseObject, float]) -> dict[c4d.BaseOb
     if totalWeight == 1:
         return weightData
     return {joint: weight / totalWeight for joint, weight in weightData.items()}
-
-def getSelectedPoints(obj: c4d.BaseObject) -> list[int]:
-    bs  = obj.GetPointS()
-    sel = bs.GetAll(obj.GetPointCount())
-    return [index for index, selected in enumerate(sel) if selected]
 
 def getSelectedPointWeight(selectedPoints: list[int],
                            weightTag: c4d.BaseTag) -> dict[int, dict]:
@@ -118,7 +168,7 @@ def main() -> None:
             return
 
         doc.SetSelection(obj, c4d.SELECTION_SUB)
-        selPoints  = getSelectedPoints(obj)
+        selPoints  = GetSelectedPointID(obj, doc.GetMode()).run()
         weightData = getSelectedPointWeight(selPoints, weightTag)
         PinObj(weightData, obj)
         c4d.CallCommand(12298)
@@ -128,14 +178,15 @@ def main() -> None:
 if __name__ == '__main__':
     main()
 
-'''
+"""
 Revision History
 Revision 1: 2024-07-8  : First publish
 Revision 2: 2024-07-20 : Add an null obj to the joint
+Revision 3: 2024-08-03 : Correctly identify point IDs in point, edge, and polygon modes
 
 code by kangddan
 https://github.com/kangddan
 https://animator.at8.fun/
 https://space.bilibili.com/174575687
 https://x.com/kangddan1
-'''
+"""
