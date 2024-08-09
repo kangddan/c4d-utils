@@ -14,10 +14,9 @@ def layerExists(layerName):
 
 def deleteLayer(layerName):
     for layer in getAllLayers():
-        if layer.GetName() != layerName:
-            continue
-        doc.AddUndo(c4d.UNDOTYPE_DELETE, layer)
-        layer.Remove()
+        if layer.GetName() == layerName:
+            doc.AddUndo(c4d.UNDOTYPE_DELETE, layer)
+            layer.Remove()
 
 def createLayer(layerName):
     layer = c4d.documents.LayerObject()
@@ -38,8 +37,8 @@ def createLayer(layerName):
     return layer
 
 def getAllObjs(obj=None, objs=None):
-    if objs is None: objs = []
-    if obj is None: obj = doc.GetFirstObject()
+    objs = objs or []
+    obj  = obj  or doc.GetFirstObject()
 
     while obj:
         objs.append(obj)
@@ -71,12 +70,13 @@ def removeDuplicates(objects):
 
 def soloObjs():
     sel = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
+    allObjs = sel[:]
     for obj in sel:
-        if obj.GetDown() is None:
-            continue
-        childrens = getAllChildren(obj)
-        sel.extend(childrens)
-    return removeDuplicates(sel)
+        if obj.GetDown() is not None:
+            childrens = getAllChildren(obj)
+            allObjs.extend(childrens)
+    
+    return removeDuplicates(allObjs)
 
 def removeSelectedObjs(all_objs, solo_objs):
     solo_guids = {obj.GetGUID() for obj in solo_objs}
@@ -85,19 +85,27 @@ def removeSelectedObjs(all_objs, solo_objs):
 
 def objToLayer(objs, layer):
     for obj in objs:
-        doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
+
+        if obj.GetLayerObject(doc) is not None:
+            doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj) # add undo
         obj.SetLayerObject(layer)
+
 # ----------------------------------------------------------------
+
 def setBaseLayer():
-    docData  = doc.GetDataInstance()
+    docData = doc.GetDataInstance()
     objCount = docData.GetData(100861122)
-    
-    startIndex=100861123
-    for obj in range(objCount):
-        obj = docData.GetData(startIndex)
-        startIndex += 1
-        layerObj = docData.GetData(startIndex)
-        startIndex += 1
+
+    baseIndex = 100861123
+    for i in range(objCount):
+        objId = baseIndex + 2 * i
+        layerId = baseIndex + 2 * i + 1
+
+        obj      = docData.GetData(objId)
+        layerObj = docData.GetData(layerId)
+        docData.RemoveData(objId)
+        docData.RemoveData(layerId)
+
         if layerObj is None:
             continue
         doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
@@ -105,14 +113,15 @@ def setBaseLayer():
 
 def setLayerObjsToContainer(objs):
     docData = doc.GetDataInstance()
-    docData.SetData(100861122, len(objs)) # set obj count
-    startIndex=100861123
-    for obj in objs:
-        docData.SetData(startIndex, obj)
-        startIndex += 1
-        layerObj = obj.GetLayerObject(doc)
-        docData.SetData(startIndex, layerObj)
-        startIndex += 1
+    docData.SetData(100861122, len(objs))  # Set objs count
+
+    baseIndex = 100861123
+    for i, obj in enumerate(objs):
+        dataIndex = baseIndex + 2 * i
+        docData.SetData(dataIndex, obj)
+        docData.SetData(dataIndex + 1, obj.GetLayerObject(doc))
+
+# ----------------------------------------------------------------
 
 def main():
     doc.StartUndo()
@@ -122,15 +131,11 @@ def main():
         setBaseLayer()
     else:
         solo_layer = createLayer(LAYERNAME)
+        noSoloObjs = removeSelectedObjs(getAllObjs(), soloObjs())
+        noSoloObjs.extend(getTags(noSoloObjs))
 
-        all_objs   = getAllObjs()
-        solo_objs  = soloObjs()
-        updateObjs = removeSelectedObjs(all_objs, solo_objs)
-        tags       = getTags(updateObjs)
-        updateObjs.extend(tags)
-
-        setLayerObjsToContainer(updateObjs)
-        objToLayer(updateObjs, solo_layer)
+        setLayerObjsToContainer(noSoloObjs)
+        objToLayer(noSoloObjs, solo_layer)
 
     doc.EndUndo()
     c4d.EventAdd()
