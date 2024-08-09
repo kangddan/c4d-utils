@@ -1,8 +1,6 @@
 import c4d
 
-LAYERNAME = '< HIDE_OBJS_LAYER >'
-ROOT      = doc.GetLayerObjectRoot()
-
+ROOT = doc.GetLayerObjectRoot()
 def getAllLayers():
     return ROOT.GetChildren()
 
@@ -14,9 +12,10 @@ def layerExists(layerName):
 
 def deleteLayer(layerName):
     for layer in getAllLayers():
-        if layer.GetName() == layerName:
-            doc.AddUndo(c4d.UNDOTYPE_DELETE, layer)
-            layer.Remove()
+        if layer.GetName() != layerName:
+            continue
+        doc.AddUndo(c4d.UNDOTYPE_DELETE, layer)
+        layer.Remove()
 
 def createLayer(layerName):
     layer = c4d.documents.LayerObject()
@@ -72,10 +71,12 @@ def soloObjs():
     sel = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
     allObjs = sel[:]
     for obj in sel:
+        #  Scrolls first active object into visible area
+        c4d.CallCommand(100004769)
         if obj.GetDown() is not None:
             childrens = getAllChildren(obj)
             allObjs.extend(childrens)
-    
+
     return removeDuplicates(allObjs)
 
 def removeSelectedObjs(all_objs, solo_objs):
@@ -87,7 +88,7 @@ def objToLayer(objs, layer):
     for obj in objs:
 
         if obj.GetLayerObject(doc) is not None:
-            doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj) # add undo
+            doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj) # add undo to layerObj
         obj.SetLayerObject(layer)
 
 # ----------------------------------------------------------------
@@ -103,8 +104,6 @@ def setBaseLayer():
 
         obj      = docData.GetData(objId)
         layerObj = docData.GetData(layerId)
-        docData.RemoveData(objId)
-        docData.RemoveData(layerId)
 
         if layerObj is None:
             continue
@@ -119,10 +118,13 @@ def setLayerObjsToContainer(objs):
     for i, obj in enumerate(objs):
         dataIndex = baseIndex + 2 * i
         docData.SetData(dataIndex, obj)
-        docData.SetData(dataIndex + 1, obj.GetLayerObject(doc))
+
+        layerObj = obj.GetLayerObject(doc)
+        if layerObj is not None:
+            docData.SetData(dataIndex + 1, obj.GetLayerObject(doc))
 
 # ----------------------------------------------------------------
-
+LAYERNAME = '< HIDE_OBJS_LAYER >'
 def main():
     doc.StartUndo()
 
