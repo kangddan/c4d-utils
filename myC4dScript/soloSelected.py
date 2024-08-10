@@ -45,12 +45,13 @@ class LayerUtils(object):
     @staticmethod
     def toLayer(objs, layerObj):
         for obj in objs:
-            if obj.GetLayerObject(doc) is not None:
-                doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj) # add undo to layerObj
+            if obj.GetLayerObject(doc) is not None: # add undo to layerObj
+                doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
             obj.SetLayerObject(layerObj)
 
 def getAllObjs(obj=None, objs=None):
-    objs = objs or []
+    if objs is None: objs = []
+    if obj  is None: obj = doc.GetFirstObject()
 
     while obj:
         objs.append(obj)
@@ -61,6 +62,22 @@ def getAllObjs(obj=None, objs=None):
 
 def getTags(objs):
     return [tag for obj in objs for tag in obj.GetTags()]
+
+def getNoSoloMaterials(noSoloTags, soloTags):
+    allMat    = doc.GetMaterials()
+    noSoloMat = set(tag.GetMaterial() for tag in noSoloTags if isinstance(tag, c4d.TextureTag))
+    soloMat   = set(tag.GetMaterial() for tag in soloTags   if isinstance(tag, c4d.TextureTag))
+    
+    # delete duplicate materials
+    noSoloMatFinal = noSoloMat - soloMat
+    
+    # add unused materials
+    usedMats = noSoloMat | soloMat
+    for _mat in allMat:
+        if _mat not in usedMats:
+            noSoloMatFinal.add(_mat)
+    
+    return noSoloMatFinal
 
 def getAllChildren(obj, children=None):
     if children is None:
@@ -96,35 +113,41 @@ def removeSelectedObjs(all_objs, solo_objs):
 
 # ----------------------------------------------------------------
 
-def setBaseLayer():
-    docData = doc.GetDataInstance()
-    objCount = docData.GetData(100861122)
+def updateNoSoloObjsState():
+    mainData = doc.GetDataInstance()
+    objCount = mainData.GetData(100861122)
 
     baseIndex = 100861123
     for i in range(objCount):
-        objId   = baseIndex + 2 * i
-        layerId = baseIndex + 2 * i + 1
+        subData = mainData.GetData(baseIndex)
+        obj     = subData.GetData(0)
+        layer   = subData.GetData(1)
 
-        obj      = docData.GetData(objId)
-        layerObj = docData.GetData(layerId)
-
-        if layerObj is None:
+        baseIndex += 1
+        if layer is None:
             continue
         doc.AddUndo(c4d.UNDOTYPE_CHANGE, obj)
-        obj.SetLayerObject(layerObj)
+        obj.SetLayerObject(layer)
 
-def setLayerObjsToContainer(objs):
-    docData = doc.GetDataInstance()
-    docData.SetData(100861122, len(objs))  # Set objs count
+    mainData.SetData(100861121, 1) # end solo
+
+def getNoSoloObjsCurrentState(objs):
+    mainData = doc.GetDataInstance()
+    if mainData.GetData(100861121) == 0:
+        return
+
+    mainData.SetData(100861121, 0)          # set start solo ID
+    mainData.SetData(100861122, len(objs))  # set objs count ID
 
     baseIndex = 100861123
     for i, obj in enumerate(objs):
-        dataIndex = baseIndex + 2 * i
-        docData.SetData(dataIndex, obj)
-
-        layerObj = obj.GetLayerObject(doc)
-        #if layerObj is not None:
-        docData.SetData(dataIndex + 1, obj.GetLayerObject(doc))
+        # add sub data
+        subData = c4d.BaseContainer()
+        subData.SetData(0, obj)
+        subData.SetData(1, obj.GetLayerObject(doc))
+        # ------------------------------------------
+        mainData.SetData(baseIndex, subData)
+        baseIndex += 1
 
 # ----------------------------------------------------------------
 
@@ -135,16 +158,22 @@ def main():
     layerName = '< HIDE_OBJS_LAYER >'
     if layer.exists(layerName):
         layer.delete(layerName)
-        setBaseLayer()
+        updateNoSoloObjsState()
     else:
-        sel = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
+        sel          = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
         soloLayerObj = layer.createLayer(layerName)
-        noSoloObjs   = removeSelectedObjs(getAllObjs(doc.GetFirstObject()), soloObjs(sel))
-        noSoloObjs.extend(getTags(noSoloObjs))
-        print(len(noSoloObjs))
-        setLayerObjsToContainer(noSoloObjs)
-        layer.toLayer(noSoloObjs, soloLayerObj)
+        _soloObjs    = soloObjs(sel)
+        noSoloObjs   = removeSelectedObjs(getAllObjs(), _soloObjs)
+        
+        noSoloTags   = getTags(noSoloObjs)
+        noSoloMats   = getNoSoloMaterials(noSoloTags, getTags(_soloObjs))
+        
+        noSoloObjs.extend(noSoloTags)
+        noSoloObjs.extend(noSoloMats)
 
+        getNoSoloObjsCurrentState(noSoloObjs)
+        layer.toLayer(noSoloObjs, soloLayerObj)
+        
         # Scrolls first active object into visible area
         c4d.CallCommand(100004769)
 
@@ -153,3 +182,13 @@ def main():
 
 if __name__ == '__main__':
     main()
+'''
+Revision History
+Revision 1: 2024-08-10 : First publish
+
+code by kangddan
+https://github.com/kangddan
+https://animator.at8.fun/
+https://space.bilibili.com/174575687
+https://x.com/kangddan1
+'''
