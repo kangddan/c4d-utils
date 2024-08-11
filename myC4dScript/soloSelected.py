@@ -67,41 +67,45 @@ def getNoSoloMaterials(noSoloTags, soloTags):
     allMat    = doc.GetMaterials()
     noSoloMat = set(tag.GetMaterial() for tag in noSoloTags if isinstance(tag, c4d.TextureTag))
     soloMat   = set(tag.GetMaterial() for tag in soloTags   if isinstance(tag, c4d.TextureTag))
-    
+
     # delete duplicate materials
     noSoloMatFinal = noSoloMat - soloMat
-    
+
     # add unused materials
     usedMats = noSoloMat | soloMat
     for _mat in allMat:
         if _mat not in usedMats:
             noSoloMatFinal.add(_mat)
-    
+
     return noSoloMatFinal
 
-def getAllChildren(obj, children=None):
+def getAllChildrens(obj, children=None):
     if children is None:
         children = []
     child = obj.GetDown()
     while child:
         children.append(child)
-        getAllChildren(child, children)
+        getAllChildrens(child, children)
         child = child.GetNext()
     return children
 
 def removeDuplicates(objects):
-    unique = {}
+    #uniqueObjs = {obj.GetGUID(): obj for obj in objects}
+    #return list(uniqueObjs.values())
+
+    uniqueObjs = {}
     for obj in objects:
         guid = obj.GetGUID()
-        if guid not in unique:
-            unique[guid] = obj
-    return list(unique.values())
+        if guid not in uniqueObjs:
+            uniqueObjs[guid] = obj
+    return list(uniqueObjs.values())
+
 
 def soloObjs(sel):
     allObjs = sel[:]
     for obj in sel:
         if obj.GetDown() is not None:
-            childrens = getAllChildren(obj)
+            childrens = getAllChildrens(obj)
             allObjs.extend(childrens)
 
     return removeDuplicates(allObjs)
@@ -150,6 +154,82 @@ def getNoSoloObjsCurrentState(objs):
         baseIndex += 1
 
 # ----------------------------------------------------------------
+def getAllParents(obj):
+    parents = []
+    while obj:
+        parent = obj.GetUp()
+        if parent:
+            parents.append(parent)
+            obj = parent
+        else:
+            break
+    return parents
+
+def getObjsFoldStatuses(objs):
+    return [obj.GetNBit(c4d.NBIT_OM1_FOLD) for obj in objs]
+
+def getParentsAndFoldStatuses(objs):
+    parents = []
+    for obj in objs:
+        _parents = getAllParents(obj)
+        parents.extend(_parents)
+    newParents          = removeDuplicates(parents)
+    ParentsFoldStatuses = getObjsFoldStatuses(newParents)
+    return newParents, ParentsFoldStatuses
+
+# ---------------------------------------------------------------
+
+def __toggleFold(objs, foldStatuses, action):
+
+    for obj, state in zip(objs, foldStatuses):
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE_SMALL, obj)
+        if action and not state:
+            obj.ChangeNBit(c4d.NBIT_OM1_FOLD, c4d.NBITCONTROL_SET)
+        elif not action and not state:
+            obj.ChangeNBit(c4d.NBIT_OM1_FOLD, c4d.NBITCONTROL_CLEAR)
+
+def openFold(objs, FoldStatuses):
+    __toggleFold(objs, FoldStatuses, True)
+
+def closeFold(objs, FoldStatuses):
+    __toggleFold(objs, FoldStatuses, False)
+
+
+# ----------------------------------------------------------------
+def foldInfoToDocData(parents, FoldStatuses):
+    mainData = doc.GetDataInstance()
+    if mainData.GetData(1518039926) == 0:
+        return
+    mainData.SetData(1518039926, 0)
+    mainData.SetData(1518039927, len(parents))  # set objs count ID
+
+    baseIndex = 1518039928
+    for parent, fold in zip(parents, FoldStatuses):
+        # add sub data
+        subData = c4d.BaseContainer()
+        subData.SetData(0, parent)
+        subData.SetData(1, fold)
+        # ------------------------------------------
+        mainData.SetData(baseIndex, subData)
+        baseIndex += 1
+
+def updateParentsFoldStatuses():
+    mainData = doc.GetDataInstance()
+    parentCount = mainData.GetData(1518039927)
+
+    parents      = []
+    foldStatuses = []
+    baseIndex = 1518039928
+    for i in range(parentCount):
+        subData = mainData.GetData(baseIndex)
+        parents.append(subData.GetData(0))
+        foldStatuses.append(subData.GetData(1))
+        baseIndex += 1
+
+    mainData.SetData(1518039926, 1) # end
+    return parents, foldStatuses
+
+# ----------------------------------------------------------------
 
 def main():
     doc.StartUndo()
@@ -159,23 +239,32 @@ def main():
     if layer.exists(layerName):
         layer.delete(layerName)
         updateNoSoloObjsState()
+
+        parents, foldStatuses = updateParentsFoldStatuses()
+        closeFold(parents, foldStatuses)
+
     else:
         sel          = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
+
         soloLayerObj = layer.createLayer(layerName)
         _soloObjs    = soloObjs(sel)
         noSoloObjs   = removeSelectedObjs(getAllObjs(), _soloObjs)
-        
+
         noSoloTags   = getTags(noSoloObjs)
         noSoloMats   = getNoSoloMaterials(noSoloTags, getTags(_soloObjs))
-        
+
         noSoloObjs.extend(noSoloTags)
         noSoloObjs.extend(noSoloMats)
 
         getNoSoloObjsCurrentState(noSoloObjs)
         layer.toLayer(noSoloObjs, soloLayerObj)
-        
-        # Scrolls first active object into visible area
-        c4d.CallCommand(100004769)
+
+        # ----------------------------------------
+        # get Fold info
+        parents, foldStatuses = getParentsAndFoldStatuses(sel)
+        foldInfoToDocData(parents, foldStatuses)
+        # open parent fold
+        openFold(parents, foldStatuses)
 
     doc.EndUndo()
     c4d.EventAdd()
