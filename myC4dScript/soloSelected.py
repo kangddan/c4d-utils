@@ -1,12 +1,12 @@
 import c4d
 
-class LayerUtils(object):
+class DocLayerManager(object):
 
     def __init__(self):
-        self.root = doc.GetLayerObjectRoot()
+        self.layerRoot = doc.GetLayerObjectRoot()
 
     def allLayers(self):
-        return getAllObjs(self.root.GetDown())
+        return getAllObjs(self.layerRoot.GetDown())
 
     def exists(self, layerName):
         return layerName in [layer.GetName() for layer in self.allLayers()]
@@ -19,10 +19,12 @@ class LayerUtils(object):
         return None
 
     def delete(self, layerName):
-        if self.exists(layerName):
-            layerObj = self.layerByName(layerName)
-            doc.AddUndo(c4d.UNDOTYPE_DELETE, layerObj)
-            layerObj.Remove()
+        if not self.exists(layerName):
+            raise LookupError("Layer '{}' not found".format(layerName))
+
+        layerObj = self.layerByName(layerName)
+        doc.AddUndo(c4d.UNDOTYPE_DELETE, layerObj)
+        layerObj.Remove()
 
     def createLayer(self, layerName):
         layer = c4d.documents.LayerObject()
@@ -39,7 +41,7 @@ class LayerUtils(object):
                                       'animation':False,
                                       'xref':True})
         layer.SetName(layerName)
-        layer.InsertUnder(self.root)
+        layer.InsertUnder(self.layerRoot)
         return layer
 
     @staticmethod
@@ -135,7 +137,7 @@ def updateNoSoloObjsState():
 
     mainData.SetData(100861121, 1) # end solo
 
-def getNoSoloObjsCurrentState(objs):
+def noSoloObjsCurrentStateToDocData(objs):
     mainData = doc.GetDataInstance()
     if mainData.GetData(100861121) == 0:
         return
@@ -233,11 +235,11 @@ def updateParentsFoldStatuses():
 
 def main():
     doc.StartUndo()
-    layer = LayerUtils()
+    layerMgr = DocLayerManager()
 
     layerName = '< HIDE_OBJS_LAYER >'
-    if layer.exists(layerName):
-        layer.delete(layerName)
+    if layerMgr.exists(layerName):
+        layerMgr.delete(layerName)
         updateNoSoloObjsState()
 
         parents, foldStatuses = updateParentsFoldStatuses()
@@ -246,7 +248,7 @@ def main():
     else:
         sel          = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_CHILDREN)
 
-        soloLayerObj = layer.createLayer(layerName)
+        soloLayerObj = layerMgr.createLayer(layerName)
         _soloObjs    = soloObjs(sel)
         noSoloObjs   = removeSelectedObjs(getAllObjs(), _soloObjs)
 
@@ -256,8 +258,8 @@ def main():
         noSoloObjs.extend(noSoloTags)
         noSoloObjs.extend(noSoloMats)
 
-        getNoSoloObjsCurrentState(noSoloObjs)
-        layer.toLayer(noSoloObjs, soloLayerObj)
+        noSoloObjsCurrentStateToDocData(noSoloObjs)
+        layerMgr.toLayer(noSoloObjs, soloLayerObj)
 
         # ----------------------------------------
         # get Fold info
